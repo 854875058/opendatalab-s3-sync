@@ -1,0 +1,17 @@
+# 临时文件
+temp_download/
+__pycache__/
+*.pyc
+
+# 缓存文件
+file_list_cache_*.txt
+sync_progress_*.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 系统文件
+.DS_Store
+Thumbs.db

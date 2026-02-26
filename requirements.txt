@@ -1,0 +1,3 @@
+openxlab>=0.0.1
+minio>=7.1.0
+
