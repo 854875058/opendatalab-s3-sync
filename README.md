@@ -1,10 +1,12 @@
-# OpenDataLab to MinIO Sync
+# OpenDataLab S3 Sync
 
-将 [OpenDataLab](https://opendatalab.com) 开放数据集同步到内网 MinIO 对象存储的 Python 工具。
+将 [OpenDataLab](https://opendatalab.com) 开放数据集同步到 S3 兼容对象存储的 Python 工具。
+
+支持 **MinIO** / **AWS S3** / **阿里云 OSS** / **腾讯云 COS**。
 
 ## 解决什么问题
 
-在企业内网环境中，直接访问公网数据集平台不方便或不稳定。这个工具可以把 OpenDataLab 上的数据集逐文件同步到你的 MinIO 存储中，适合：
+在企业内网环境中，直接访问公网数据集平台不方便或不稳定。这个工具可以把 OpenDataLab 上的数据集逐文件同步到你的对象存储中，适合：
 
 - 内网 AI 训练环境需要使用公开数据集
 - 需要将数据集统一管理到私有对象存储
@@ -12,7 +14,8 @@
 
 ## 特性
 
-- **逐文件处理** — 下载单个文件 → 上传 MinIO → 删除临时文件，最小化磁盘占用
+- **多存储后端** — 支持 MinIO、AWS S3、阿里云 OSS、腾讯云 COS
+- **逐文件处理** — 下载单个文件 → 上传存储 → 删除临时文件，最小化磁盘占用
 - **断点续传** — 自动跳过已同步的文件，中断后重新运行即可继续
 - **多种同步模式** — progressive（推荐）、sync_all、manual、auto
 - **灵活过滤** — 支持通配符的 include/exclude 规则
@@ -24,30 +27,68 @@
 
 ```bash
 pip install -r requirements.txt
+
+# 根据你使用的存储后端，安装对应 SDK：
+pip install minio>=7.1.0              # MinIO
+pip install boto3>=1.26.0             # AWS S3
+pip install oss2>=2.17.0              # 阿里云 OSS
+pip install cos-python-sdk-v5>=1.9.0  # 腾讯云 COS
 ```
 
 ### 2. 配置
 
-编辑 `sync_to_minio.py` 顶部的配置区域：
+编辑 `sync_to_s3.py` 顶部的配置区域。以下是各存储后端的配置示例：
+
+#### MinIO
 
 ```python
-# OpenDataLab 配置（在 opendatalab.com 注册获取）
-ODL_AK = 'your-opendatalab-access-key'
-ODL_SK = 'your-opendatalab-secret-key'
-DATASET_REPO = 'OpenDataLab/COCO'  # 要同步的数据集
+STORAGE_PROVIDER = 'minio'
+S3_ENDPOINT = 'your-minio-host:9000'
+S3_AK = 'your-minio-access-key'
+S3_SK = 'your-minio-secret-key'
+S3_BUCKET = 'your-bucket-name'
+S3_SECURE = False
+```
 
-# MinIO 配置
-MINIO_ENDPOINT = 'your-minio-host:9000'
-MINIO_AK = 'your-minio-access-key'
-MINIO_SK = 'your-minio-secret-key'
-MINIO_BUCKET = 'your-bucket-name'
+#### AWS S3
+
+```python
+STORAGE_PROVIDER = 'aws'
+S3_ENDPOINT = 's3.amazonaws.com'
+S3_AK = 'your-aws-access-key-id'
+S3_SK = 'your-aws-secret-access-key'
+S3_BUCKET = 'your-bucket-name'
+S3_SECURE = True
+S3_REGION = 'us-east-1'
+```
+
+#### 阿里云 OSS
+
+```python
+STORAGE_PROVIDER = 'oss'
+S3_ENDPOINT = 'oss-cn-hangzhou.aliyuncs.com'
+S3_AK = 'your-oss-access-key-id'
+S3_SK = 'your-oss-access-key-secret'
+S3_BUCKET = 'your-bucket-name'
+```
+
+#### 腾讯云 COS
+
+```python
+STORAGE_PROVIDER = 'cos'
+S3_ENDPOINT = 'cos.ap-guangzhou.myqcloud.com'
+S3_AK = 'your-cos-secret-id'
+S3_SK = 'your-cos-secret-key'
+S3_BUCKET = 'your-bucket-name'
+S3_REGION = 'ap-guangzhou'
+S3_APPID = '1250000000'  # 你的 APPID
 ```
 
 ### 3. 运行
 
 ```bash
 # 推荐：渐进式同步（自动获取文件列表，逐个下载上传）
-python sync_to_minio.py
+python sync_to_s3.py
 
 # 或者先查看文件列表再决定同步哪些
 python get_file_list.py
@@ -86,17 +127,19 @@ EXCLUDE_PATTERNS = [
 # 1. 先查看文件列表
 python get_file_list.py
 
-# 2. 将输出的文件列表复制到 sync_to_minio.py，分批配置 FILES_TO_SYNC
-# 3. 每批运行一次 python sync_to_minio.py
+# 2. 将输出的文件列表复制到 sync_to_s3.py，分批配置 FILES_TO_SYNC
+# 3. 每批运行一次 python sync_to_s3.py
 ```
 
 ## 项目结构
 
 ```
 .
-├── sync_to_minio.py    # 主同步脚本
-├── get_file_list.py    # 文件列表查询工具（不下载数据）
-├── requirements.txt    # Python 依赖
+├── sync_to_s3.py          # 主同步脚本（支持多存储后端）
+├── storage_backends.py    # 存储后端抽象层（MinIO/AWS/OSS/COS）
+├── get_file_list.py       # 文件列表查询工具（不下载数据）
+├── sync_to_minio.py       # 旧版脚本（仅 MinIO，保留兼容）
+├── requirements.txt       # Python 依赖
 └── README.md
 ```
 
