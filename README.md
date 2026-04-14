@@ -1,147 +1,157 @@
+<div align="center">
+
 # OpenDataLab S3 Sync
 
-将 [OpenDataLab](https://opendatalab.com) 开放数据集同步到 S3 兼容对象存储的 Python 工具。
+**OpenDataLab 数据集同步工具**
 
-支持 **MinIO** / **AWS S3** / **阿里云 OSS** / **腾讯云 COS**。
+*Progressive dataset sync from OpenDataLab to any S3-compatible object storage with minimal disk footprint*
 
-## 解决什么问题
+[![Python](https://img.shields.io/badge/Python-3.x-3776AB?logo=python)](https://python.org/)
+[![MinIO](https://img.shields.io/badge/MinIO-Object_Storage-C72E49?logo=minio)](https://min.io/)
+[![AWS S3](https://img.shields.io/badge/AWS-S3-FF9900?logo=amazons3)](https://aws.amazon.com/s3/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-在企业内网环境中，直接访问公网数据集平台不方便或不稳定。这个工具可以把 OpenDataLab 上的数据集逐文件同步到你的对象存储中，适合：
+</div>
 
-- 内网 AI 训练环境需要使用公开数据集
-- 需要将数据集统一管理到私有对象存储
-- 大数据集需要断点续传、避免磁盘爆炸
+---
 
-## 特性
+## Overview
 
-- **多存储后端** — 支持 MinIO、AWS S3、阿里云 OSS、腾讯云 COS
-- **逐文件处理** — 下载单个文件 → 上传存储 → 删除临时文件，最小化磁盘占用
-- **断点续传** — 自动跳过已同步的文件，中断后重新运行即可继续
-- **多种同步模式** — progressive（推荐）、sync_all、manual、auto
-- **灵活过滤** — 支持通配符的 include/exclude 规则
-- **多数据集友好** — 每个数据集独立的缓存和进度文件，互不干扰
+AI 训练数据集动辄数百 GB，从 OpenDataLab 下载后再上传到私有存储，磁盘占用翻倍、传输效率低下。
 
-## 快速开始
+本工具实现了 **渐进式同步**：逐文件下载 → 上传 → 立即删除本地副本，全程磁盘占用不超过单个文件大小。支持 MinIO、AWS S3、阿里云 OSS、腾讯云 COS 四大存储后端，通过工厂模式统一抽象。内置断点续传、通配符过滤、进度缓存，大规模数据集同步一条命令搞定。
 
-### 1. 安装依赖
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      OpenDataLab API                         │
+├─────────────────────────────────────────────────────────────┤
+│              Progressive Sync Engine (Python)                 │
+│         Download → Upload → Delete → Next File                │
+├──────────┬──────────┬──────────┬────────────────────────────┤
+│  MinIO   │  AWS S3  │ Aliyun   │  Tencent COS               │
+│          │          │  OSS     │                              │
+└──────────┴──────────┴──────────┴────────────────────────────┘
+```
+
+## Key Features
+
+### Progressive Sync Mode
+逐文件处理：下载单个文件 → 上传到目标存储 → 立即删除本地副本。磁盘占用始终保持在单文件级别，适合磁盘空间有限的环境。
+
+### Multi-Backend Storage
+通过工厂模式统一抽象四大存储后端，切换存储只需修改配置参数，业务代码零改动。
+
+| Backend | SDK | 认证方式 |
+|---------|-----|----------|
+| MinIO | `minio` | Access Key + Secret Key |
+| AWS S3 | `boto3` | IAM / Access Key |
+| Aliyun OSS | `oss2` | Access Key + Secret Key |
+| Tencent COS | `cos-python-sdk-v5` | Secret ID + Secret Key |
+
+### Resume & Deduplication
+内置缓存文件记录已同步文件列表，中断后重启自动跳过已完成文件。支持按数据集自动命名缓存文件。
+
+### Flexible Filtering
+支持 include/exclude 通配符模式过滤，精确控制同步范围。例如只同步 `.parquet` 文件或排除 `.zip` 大文件。
+
+### Multiple Sync Modes
+
+| Mode | Description |
+|------|-------------|
+| `progressive` | 逐文件下载上传删除（默认，最省磁盘） |
+| `sync_all` | 先全量下载再批量上传 |
+| `manual` | 仅下载到本地，手动上传 |
+| `auto` | 根据磁盘空间自动选择模式 |
+
+## Tech Stack
+
+```
+Core                              Storage SDKs                     Utilities
+─────────────────                 ─────────────────               ─────────────────
+Python 3                          minio (MinIO)                   OpenXLab SDK
+requests (HTTP)                   boto3 (AWS S3)                  PyYAML (Config)
+pathlib (File Ops)                oss2 (Aliyun OSS)               urllib3 (HTTP)
+                                  cos-python-sdk-v5 (Tencent)
+```
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                        sync_to_s3.py                              │
+│                    (Main Sync Orchestrator)                        │
+│                                                                    │
+│  ┌─────────────┐    ┌──────────────┐    ┌────────────────────┐   │
+│  │ OpenXLab    │    │  Progressive │    │   Cache Manager    │   │
+│  │ SDK Client  │───▶│  Sync Loop   │───▶│   (Resume/Skip)    │   │
+│  └─────────────┘    └──────┬───────┘    └────────────────────┘   │
+│                            │                                       │
+│                    ┌───────▼────────┐                              │
+│                    │ storage_       │                              │
+│                    │ backends.py    │                              │
+│                    │ (Factory)      │                              │
+│                    └───────┬────────┘                              │
+│           ┌────────┬───────┼────────┬──────────┐                  │
+│      ┌────▼───┐┌───▼──┐┌──▼───┐┌───▼─────┐                      │
+│      │ MinIO  ││ S3   ││ OSS  ││  COS    │                      │
+│      └────────┘└──────┘└──────┘└─────────┘                      │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+## Quick Start
 
 ```bash
+# 1. Clone
+git clone https://github.com/854875058/opendatalab-s3-sync.git
+cd opendatalab-s3-sync
+
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# 根据你使用的存储后端，安装对应 SDK：
-pip install minio>=7.1.0              # MinIO
-pip install boto3>=1.26.0             # AWS S3
-pip install oss2>=2.17.0              # 阿里云 OSS
-pip install cos-python-sdk-v5>=1.9.0  # 腾讯云 COS
+# 3. Sync dataset to MinIO
+python sync_to_s3.py \
+  --dataset "OpenDataLab/COCO_2017" \
+  --backend minio \
+  --endpoint "localhost:9000" \
+  --access-key "minioadmin" \
+  --secret-key "minioadmin" \
+  --bucket "datasets"
+
+# 4. Or just list files without downloading
+python get_file_list.py --dataset "OpenDataLab/COCO_2017"
 ```
 
-### 2. 配置
-
-编辑 `sync_to_s3.py` 顶部的配置区域。以下是各存储后端的配置示例：
-
-#### MinIO
-
-```python
-STORAGE_PROVIDER = 'minio'
-S3_ENDPOINT = 'your-minio-host:9000'
-S3_AK = 'your-minio-access-key'
-S3_SK = 'your-minio-secret-key'
-S3_BUCKET = 'your-bucket-name'
-S3_SECURE = False
-```
-
-#### AWS S3
-
-```python
-STORAGE_PROVIDER = 'aws'
-S3_ENDPOINT = 's3.amazonaws.com'
-S3_AK = 'your-aws-access-key-id'
-S3_SK = 'your-aws-secret-access-key'
-S3_BUCKET = 'your-bucket-name'
-S3_SECURE = True
-S3_REGION = 'us-east-1'
-```
-
-#### 阿里云 OSS
-
-```python
-STORAGE_PROVIDER = 'oss'
-S3_ENDPOINT = 'oss-cn-hangzhou.aliyuncs.com'
-S3_AK = 'your-oss-access-key-id'
-S3_SK = 'your-oss-access-key-secret'
-S3_BUCKET = 'your-bucket-name'
-```
-
-#### 腾讯云 COS
-
-```python
-STORAGE_PROVIDER = 'cos'
-S3_ENDPOINT = 'cos.ap-guangzhou.myqcloud.com'
-S3_AK = 'your-cos-secret-id'
-S3_SK = 'your-cos-secret-key'
-S3_BUCKET = 'your-bucket-name'
-S3_REGION = 'ap-guangzhou'
-S3_APPID = '1250000000'  # 你的 APPID
-```
-
-### 3. 运行
-
-```bash
-# 推荐：渐进式同步（自动获取文件列表，逐个下载上传）
-python sync_to_s3.py
-
-# 或者先查看文件列表再决定同步哪些
-python get_file_list.py
-```
-
-## 同步模式
-
-| 模式 | 说明 | 磁盘占用 | 适用场景 |
-|------|------|---------|---------|
-| `progressive` | 智能渐进式，逐个文件处理 | 最小（单文件大小） | 大多数场景（推荐） |
-| `sync_all` | 先下载整个数据集再上传 | 大（完整数据集） | 磁盘充足、网络不稳定 |
-| `manual` | 手动指定文件列表 | 最小（单文件大小） | 只需部分文件 |
-| `auto` | 扫描本地已下载的目录 | 0（已下载） | 已有本地数据集 |
-
-## 文件过滤
-
-```python
-SYNC_MODE = 'custom'
-
-INCLUDE_PATTERNS = [
-    'raw/*.zip',      # 只要 zip 文件
-    'README.md',
-]
-
-EXCLUDE_PATTERNS = [
-    'sample/*',       # 排除 sample 目录
-    '*.avi',          # 排除视频文件
-]
-```
-
-## 大数据集处理
-
-对于超大数据集（>50GB），推荐分批手动同步：
-
-```bash
-# 1. 先查看文件列表
-python get_file_list.py
-
-# 2. 将输出的文件列表复制到 sync_to_s3.py，分批配置 FILES_TO_SYNC
-# 3. 每批运行一次 python sync_to_s3.py
-```
-
-## 项目结构
+## Project Structure
 
 ```
-.
-├── sync_to_s3.py          # 主同步脚本（支持多存储后端）
-├── storage_backends.py    # 存储后端抽象层（MinIO/AWS/OSS/COS）
-├── get_file_list.py       # 文件列表查询工具（不下载数据）
-├── sync_to_minio.py       # 旧版脚本（仅 MinIO，保留兼容）
-├── requirements.txt       # Python 依赖
-└── README.md
+opendatalab-s3-sync/
+├── sync_to_s3.py              # Main sync orchestrator (multi-backend)
+├── storage_backends.py        # Abstract storage layer (4 backends)
+├── get_file_list.py           # Dataset file list query utility
+├── sync_to_minio.py           # Legacy MinIO-only version
+├── requirements.txt           # Python dependencies
+└── LICENSE
 ```
+
+## Usage
+
+| Command | Description |
+|---------|-------------|
+| `python sync_to_s3.py --dataset <name> --backend minio` | 同步到 MinIO |
+| `python sync_to_s3.py --dataset <name> --backend s3` | 同步到 AWS S3 |
+| `python sync_to_s3.py --dataset <name> --backend oss` | 同步到阿里云 OSS |
+| `python sync_to_s3.py --dataset <name> --backend cos` | 同步到腾讯云 COS |
+| `python get_file_list.py --dataset <name>` | 查询数据集文件列表 |
+
+### Key Options
+
+| Option | Description |
+|--------|-------------|
+| `--mode progressive` | 渐进式同步（默认） |
+| `--include "*.parquet"` | 只同步匹配文件 |
+| `--exclude "*.zip"` | 排除匹配文件 |
+| `--bucket <name>` | 目标存储桶 |
+| `--prefix <path>` | 目标路径前缀 |
 
 ## License
 
